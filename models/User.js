@@ -11,6 +11,22 @@ const addressSchema = new mongoose.Schema({
   isDefault: { type: Boolean, default: false }
 }, { timestamps: true });
 
+const cartItemSchema = new mongoose.Schema({
+  productId: { type: mongoose.Schema.Types.ObjectId, required: true },
+  name: { type: String, required: true, trim: true },
+  productType: { type: String, required: true, trim: true },
+  category: { type: String, required: true, trim: true },
+  unitPrice: { type: Number, required: true, min: 0 },
+  photoUrl: { type: String, default: '' },
+  quantity: {
+    type: Number,
+    required: true,
+    min: 1,
+    max: 99,
+    validate: { validator: Number.isInteger, message: 'Cart quantity must be a whole number.' }
+  }
+}, { timestamps: true });
+
 const userSchema = new mongoose.Schema({
   googleId: { type: String, required: true, unique: true, index: true },
   email: { type: String, required: true, lowercase: true, trim: true, index: true },
@@ -29,6 +45,11 @@ const userSchema = new mongoose.Schema({
     type: [addressSchema],
     default: [],
     validate: { validator: (addresses) => addresses.length <= 20, message: 'You can save up to 20 addresses.' }
+  },
+  cart: {
+    type: [cartItemSchema],
+    default: [],
+    validate: { validator: (items) => items.length <= 100, message: 'Your cart can contain up to 100 different products.' }
   }
 }, { timestamps: true });
 
