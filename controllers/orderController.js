@@ -48,7 +48,9 @@ function toOrderSummary(order) {
     currency: order.currency,
     paymentStatus: order.paymentStatus,
     deliveryStatus: order.deliveryStatus || 'pending',
-    deliveryMessage: order.deliveryStatus === 'delivered' ? 'Your order has been delivered.' : 'Your order is pending. You will receive your order within 10 days.',
+    deliveryMessage: order.deliveryStatus === 'delivered'
+      ? 'Your payment was received successfully. Your order has been delivered.'
+      : 'Your payment was received successfully. Your order delivery is pending. You will receive your order within 10 days.',
     deliveredAt: order.deliveredAt || null,
     paymentMethod: order.paymentMethod || '',
     paidAt: order.paidAt,
