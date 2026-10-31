@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import mongoose from 'mongoose';
 import Order from '../models/Order.js';
+import User from '../models/User.js';
 import { getCatalogProducts } from '../services/catalogService.js';
 
 function httpError(statusCode, message) {
@@ -19,6 +20,33 @@ function verifyHexSignature(expected, supplied) {
   const expectedBuffer = Buffer.from(expected, 'hex');
   const suppliedBuffer = Buffer.from(supplied, 'hex');
   return expectedBuffer.length === suppliedBuffer.length && timingSafeEqual(expectedBuffer, suppliedBuffer);
+}
+
+async function applyPurchasedCart(order) {
+  if (order.source !== 'cart' || !order.items?.length) return;
+
+  const claimedOrder = await Order.findOneAndUpdate(
+    { _id: order._id, paymentStatus: 'paid', source: 'cart', cartAppliedAt: null },
+    { $set: { cartAppliedAt: new Date() } },
+    { new: true }
+  );
+  if (!claimedOrder) return;
+
+  const user = await User.findById(order.userId);
+  if (!user) return;
+  try {
+    for (const purchasedItem of order.items) {
+      const cartIndex = user.cart.findIndex((item) => String(item.productId) === String(purchasedItem.productId));
+      if (cartIndex < 0) continue;
+      const cartItem = user.cart[cartIndex];
+      if (cartItem.quantity > purchasedItem.quantity) cartItem.quantity -= purchasedItem.quantity;
+      else user.cart.splice(cartIndex, 1);
+    }
+    await user.save();
+  } catch (error) {
+    await Order.updateOne({ _id: order._id, cartAppliedAt: claimedOrder.cartAppliedAt }, { $set: { cartAppliedAt: null } }).catch(() => {});
+    throw error;
+  }
 }
 
 async function razorpayRequest(path, init = {}) {
@@ -73,10 +101,24 @@ export async function createPaymentOrder(req, res, next) {
     const { keyId } = getCredentials();
     localOrder = await Order.create({
       userId: req.user._id,
+      customerName: req.user.name,
+      customerEmail: req.user.email,
       productId: product._id,
       productName: product.name,
       productType: product.productType,
       category: product.category,
+      productPhotoUrl: product.photo?.url || '',
+      items: [{
+        productId: product._id,
+        name: product.name,
+        productType: product.productType,
+        category: product.category,
+        photoUrl: product.photo?.url || '',
+        quantity,
+        unitPrice,
+        lineTotal: Number((unitPrice * quantity).toFixed(2))
+      }],
+      source: 'buy_now',
       quantity,
       unitPrice,
       amount,
@@ -114,6 +156,87 @@ export async function createPaymentOrder(req, res, next) {
   }
 }
 
+export async function createCartPaymentOrder(req, res, next) {
+  let localOrder;
+  try {
+    const cart = req.user.cart || [];
+    if (!cart.length) throw httpError(400, 'Your cart is empty. Add a product before checkout.');
+
+    const products = await getCatalogProducts(cart.map((item) => String(item.productId)));
+    const productsById = new Map(products.map((product) => [String(product._id), product]));
+    const items = cart.map((cartItem) => {
+      const product = productsById.get(String(cartItem.productId));
+      if (!product) throw httpError(409, `${cartItem.name} is no longer available in the catalog.`);
+      if (!Number.isFinite(product.price) || product.price < 0 || !Number.isInteger(product.stock) || product.stock < cartItem.quantity) {
+        throw httpError(409, `${product.name} does not have enough stock for your cart quantity.`);
+      }
+      const unitPrice = Number(product.price.toFixed(2));
+      return {
+        productId: product._id,
+        name: product.name,
+        productType: product.productType,
+        category: product.category,
+        photoUrl: product.photo?.url || '',
+        quantity: cartItem.quantity,
+        unitPrice,
+        lineTotal: Number((unitPrice * cartItem.quantity).toFixed(2))
+      };
+    });
+
+    const amount = items.reduce((sum, item) => sum + Math.round(item.unitPrice * 100) * item.quantity, 0);
+    if (amount < 100) throw httpError(400, 'The minimum payment amount is ₹1.00.');
+    if (!Number.isSafeInteger(amount)) throw httpError(400, 'The payment amount is invalid.');
+
+    const { keyId } = getCredentials();
+    const firstItem = items[0];
+    const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
+    localOrder = await Order.create({
+      userId: req.user._id,
+      customerName: req.user.name,
+      customerEmail: req.user.email,
+      productId: firstItem.productId,
+      productName: items.length === 1 ? firstItem.name : `${items.length} products`,
+      productType: firstItem.productType,
+      category: firstItem.category,
+      productPhotoUrl: firstItem.photoUrl,
+      items,
+      source: 'cart',
+      quantity: totalQuantity,
+      unitPrice: firstItem.unitPrice,
+      amount,
+      currency: 'INR',
+      receipt: `ss_${new mongoose.Types.ObjectId().toString()}`,
+      paymentStatus: 'creating'
+    });
+
+    const gatewayOrder = await razorpayRequest('/orders', {
+      method: 'POST',
+      body: JSON.stringify({ amount, currency: 'INR', receipt: localOrder.receipt })
+    });
+    if (!gatewayOrder.id || gatewayOrder.amount !== amount || gatewayOrder.currency !== 'INR') {
+      throw httpError(502, 'Razorpay returned an invalid order response.');
+    }
+    localOrder.razorpayOrderId = gatewayOrder.id;
+    localOrder.paymentStatus = 'pending';
+    await localOrder.save();
+
+    return res.status(201).json({
+      localOrderId: localOrder.id,
+      keyId,
+      orderId: gatewayOrder.id,
+      amount: gatewayOrder.amount,
+      currency: gatewayOrder.currency,
+      productName: items.length === 1 ? firstItem.name : `${items.length} products`
+    });
+  } catch (error) {
+    if (localOrder && localOrder.paymentStatus === 'creating') {
+      localOrder.paymentStatus = 'failed';
+      await localOrder.save().catch(() => {});
+    }
+    return next(error);
+  }
+}
+
 export async function verifyPayment(req, res, next) {
   try {
     const { localOrderId, razorpay_order_id: razorpayOrderId, razorpay_payment_id: paymentId, razorpay_signature: signature } = req.body || {};
@@ -140,13 +263,16 @@ export async function verifyPayment(req, res, next) {
     }
     if (payment.status === 'captured') {
       order.razorpayPaymentId = payment.id;
+      order.paymentMethod = payment.method || '';
       order.paymentStatus = 'paid';
       order.paidAt = order.paidAt || new Date();
       await order.save();
+      await applyPurchasedCart(order).catch((error) => console.error(`Could not sync paid cart order: ${error.message}`));
       return res.json({ verified: true, status: 'paid', orderId: order.id });
     }
     if (payment.status === 'authorized') {
       order.razorpayPaymentId = payment.id;
+      order.paymentMethod = payment.method || '';
       order.paymentStatus = 'authorized';
       await order.save();
       return res.status(202).json({ verified: true, status: 'authorized', orderId: order.id, message: 'Payment is authorized and awaiting capture.' });
@@ -192,11 +318,14 @@ export async function handleRazorpayWebhook(req, res) {
 
     if (event.event === 'payment.captured') {
       order.razorpayPaymentId = payment.id || order.razorpayPaymentId;
+      order.paymentMethod = payment.method || order.paymentMethod;
       order.paymentStatus = 'paid';
       order.paidAt = order.paidAt || new Date();
       await order.save();
+      await applyPurchasedCart(order);
     } else if (event.event === 'payment.failed' && order.paymentStatus !== 'paid') {
       order.razorpayPaymentId = payment.id || order.razorpayPaymentId;
+      order.paymentMethod = payment.method || order.paymentMethod;
       order.paymentStatus = 'failed';
       await order.save();
     }
