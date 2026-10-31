@@ -15,6 +15,7 @@ const orderSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   customerName: { type: String, trim: true, default: '' },
   customerEmail: { type: String, lowercase: true, trim: true, default: '', index: true },
+  customerPhone: { type: String, trim: true, default: '' },
   productId: { type: mongoose.Schema.Types.ObjectId, required: true },
   productName: { type: String, required: true, trim: true },
   productType: { type: String, required: true, trim: true },
@@ -36,6 +37,9 @@ const orderSchema = new mongoose.Schema({
     default: 'creating',
     index: true
   },
+  deliveryStatus: { type: String, enum: ['pending', 'delivered'], default: null, index: true },
+  deliveredAt: { type: Date, default: null },
+  deliveredBy: { type: String, trim: true, default: '' },
   paidAt: { type: Date, default: null },
   cartAppliedAt: { type: Date, default: null }
 }, { timestamps: true });

@@ -103,6 +103,7 @@ export async function createPaymentOrder(req, res, next) {
       userId: req.user._id,
       customerName: req.user.name,
       customerEmail: req.user.email,
+      customerPhone: req.user.phoneNumber || '',
       productId: product._id,
       productName: product.name,
       productType: product.productType,
@@ -194,6 +195,7 @@ export async function createCartPaymentOrder(req, res, next) {
       userId: req.user._id,
       customerName: req.user.name,
       customerEmail: req.user.email,
+      customerPhone: req.user.phoneNumber || '',
       productId: firstItem.productId,
       productName: items.length === 1 ? firstItem.name : `${items.length} products`,
       productType: firstItem.productType,
@@ -265,6 +267,7 @@ export async function verifyPayment(req, res, next) {
       order.razorpayPaymentId = payment.id;
       order.paymentMethod = payment.method || '';
       order.paymentStatus = 'paid';
+      order.deliveryStatus = order.deliveryStatus || 'pending';
       order.paidAt = order.paidAt || new Date();
       await order.save();
       await applyPurchasedCart(order).catch((error) => console.error(`Could not sync paid cart order: ${error.message}`));
@@ -320,6 +323,7 @@ export async function handleRazorpayWebhook(req, res) {
       order.razorpayPaymentId = payment.id || order.razorpayPaymentId;
       order.paymentMethod = payment.method || order.paymentMethod;
       order.paymentStatus = 'paid';
+      order.deliveryStatus = order.deliveryStatus || 'pending';
       order.paidAt = order.paidAt || new Date();
       await order.save();
       await applyPurchasedCart(order);

@@ -6,6 +6,7 @@ import authRoutes from './routes/authRoutes.js';
 import healthRoutes from './routes/healthRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 import paymentRoutes from './routes/paymentRoutes.js';
+import adminOrderRoutes from './routes/adminOrderRoutes.js';
 
 const app = express();
 
@@ -29,6 +30,7 @@ app.use(async (_req, res, next) => {
 app.use('/api/health', healthRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/admin', adminOrderRoutes);
 app.use('/api/payments', paymentRoutes);
 
 app.use((error, req, res, next) => {
