@@ -5,9 +5,11 @@ import connectDB from './config/database.js';
 import authRoutes from './routes/authRoutes.js';
 import healthRoutes from './routes/healthRoutes.js';
 import userRoutes from './routes/userRoutes.js';
+import paymentRoutes from './routes/paymentRoutes.js';
 
 const app = express();
 
+app.use('/api/payments/razorpay/webhook', express.raw({ type: 'application/json', limit: '1mb' }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use(cookieParser());
@@ -27,6 +29,7 @@ app.use(async (_req, res, next) => {
 app.use('/api/health', healthRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/payments', paymentRoutes);
 
 app.use((error, req, res, next) => {
   console.error(error.message);
