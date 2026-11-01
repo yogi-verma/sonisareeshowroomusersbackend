@@ -16,6 +16,13 @@ Run `npm install` and `npm run dev` from this directory.
 - `GET /api/auth/me` — return the signed-in user's profile.
 - `POST /api/auth/logout` — clear the session cookie.
 
+## Product reviews and ratings
+
+- `GET /api/products/:productId/reviews?limit=20&skip=0` — list public product reviews and return average rating, total count, and per-star counts. Results are newest first; `limit` defaults to 20 and is capped at 100. Use `pagination.hasMore` and increase `skip` to retrieve later comments.
+- `PUT /api/products/:productId/reviews` — create or update the signed-in user's review for that product. Requires a session cookie or bearer token, and validates the browser `Origin`. Send `{ "rating": 1, "comment": "Your review" }`; ratings must be whole stars from 1 to 5 and comments may contain up to 1000 characters. Each user has one review per product and can update it with the same request.
+
+Review submission verifies that the product exists in the catalog. Public review reads do not require sign-in.
+
 ## User profile and addresses
 
 All `/api/users/me` routes require a valid session cookie or `Authorization: Bearer <token>` header. Profile and address mutations also validate the browser `Origin` against `FRONTEND_ORIGIN`.
