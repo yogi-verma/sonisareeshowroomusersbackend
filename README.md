@@ -34,3 +34,20 @@ All `/api/users/me` routes require a valid session cookie or `Authorization: Bea
 - `PATCH /api/users/me/addresses/:addressId` — update supplied address fields.
 - `DELETE /api/users/me/addresses/:addressId` — delete an address. If the default address is deleted, the first remaining address becomes the default.
 Address records have a maximum of 20 per user. The first saved address is the default unless a different one is selected. Only one address can be default at a time.
+
+## Admin and customer chat
+
+Chat is one-to-one between a customer and the showroom admin account; customers cannot address other customers. A customer gets one persistent conversation, created automatically when they send their first message. Messages are limited to 2,000 characters and stored in MongoDB.
+
+Configure `ADMIN_BACKEND_URL` to point at the admin backend (default `http://localhost:5001`). Admin REST and WebSocket sessions are verified against its `GET /loggedinadmin` endpoint using the admin session token, so revoked sessions are rejected. The storefront backend needs to be able to reach the admin backend. The admin backend must allow the storefront frontend origin.
+
+REST routes (customer routes accept the user session cookie or bearer token; admin routes accept the `adminToken` cookie or bearer token):
+
+- `GET /api/chat/me?limit=50&before=<messageId>` — get the signed-in customer's conversation and newest messages; pagination returns messages in chronological order.
+- `POST /api/chat/me/messages` — send `{ "body": "..." }` as the customer.
+- `GET /api/chat/admin/conversations?limit=50&skip=0` — admin inbox with customer profile, last message, status, and unread count.
+- `GET /api/chat/admin/conversations/:conversationId/messages?limit=50&before=<messageId>` — fetch a conversation's messages.
+- `POST /api/chat/admin/conversations/:conversationId/messages` — admin reply with `{ "body": "..." }`.
+- `PATCH /api/chat/admin/conversations/:conversationId` — set `{ "status": "open" }` or `{ "status": "closed" }`.
+
+WebSocket endpoint: `ws://<backend-host>/ws/chat` (use `wss://` in production). Customer sessions authenticate with the existing `auth_token` HTTP-only cookie. Admin browsers request `POST /api/chat/admin/socket-ticket` through the storefront's server-side proxy; the 30-second single-use ticket is passed as `?ticket=...` during the WebSocket upgrade. The endpoint checks browser origin against `FRONTEND_ORIGIN`. Send JSON `{ "type": "message", "body": "..." }` as a customer. Admins send `{ "type": "message", "conversationId": "...", "body": "..." }`. Events are `{ "type": "connected", "role": "user|admin" }`, `{ "type": "message", "message": { ... } }`, or `{ "type": "error", "message": "..." }`. The customer receives messages only for their own conversation; admins receive messages across the inbox. REST endpoints provide message history after reconnecting.

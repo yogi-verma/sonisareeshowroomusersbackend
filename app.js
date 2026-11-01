@@ -8,6 +8,7 @@ import userRoutes from './routes/userRoutes.js';
 import paymentRoutes from './routes/paymentRoutes.js';
 import adminOrderRoutes from './routes/adminOrderRoutes.js';
 import productReviewRoutes from './routes/productReviewRoutes.js';
+import chatRoutes from './routes/chatRoutes.js';
 
 const app = express();
 
@@ -34,6 +35,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/admin', adminOrderRoutes);
 app.use('/api/products', productReviewRoutes);
 app.use('/api/payments', paymentRoutes);
+app.use('/api/chat', chatRoutes);
 
 app.use((error, req, res, next) => {
   console.error(error.message);
