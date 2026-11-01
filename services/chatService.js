@@ -8,7 +8,7 @@ export function serializeMessage(message) {
   return {
     id: String(message._id), conversationId: String(message.conversationId),
     senderType: message.senderType, senderId: String(message.senderId),
-    body: message.body, createdAt: message.createdAt
+    body: message.body, createdAt: message.createdAt, seenAt: message.seenAt || null
   };
 }
 
