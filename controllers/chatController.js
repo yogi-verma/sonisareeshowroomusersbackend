@@ -7,8 +7,12 @@ import { publishChatMessage, publishChatSeen } from '../services/chatEvents.js';
 import { createChatSocketTicket } from '../services/chatSocketTickets.js';
 
 function badRequest(message) { return Object.assign(new Error(message), { statusCode: 400 }); }
-export function createAdminSocketTicket(req, res) {
-  return res.json(createChatSocketTicket(req.chatAdmin.id));
+export async function createAdminSocketTicket(req, res, next) {
+  try {
+    return res.json(await createChatSocketTicket(req.chatAdmin.id));
+  } catch (error) {
+    return next(error);
+  }
 }
 function parsePage(req) {
   const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 50));

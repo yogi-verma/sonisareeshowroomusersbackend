@@ -5,7 +5,7 @@ import ChatConversation from '../models/ChatConversation.js';
 import ChatMessage from '../models/ChatMessage.js';
 import ChatPresence from '../models/ChatPresence.js';
 import { verifyAdminToken } from './chatAuthService.js';
-import { sendMessage } from './chatService.js';
+import { sendMessage, serializeMessage } from './chatService.js';
 import connectDB from '../config/database.js';
 import chatEvents, { publishChatMessage, publishChatPresence, publishChatSeen } from './chatEvents.js';
 import { consumeChatSocketTicket } from './chatSocketTickets.js';
@@ -16,6 +16,52 @@ const userSockets = new Map();
 const presenceTimers = new Map();
 const OFFLINE_GRACE_MS = 60_000;
 const ADMIN_PRESENCE_ID = 'showroom-admin';
+let changeStreamsPromise;
+
+async function ensureChatChangeStreams() {
+  if (changeStreamsPromise) return changeStreamsPromise;
+  changeStreamsPromise = (async () => {
+    const messageStream = ChatMessage.watch([], { fullDocument: 'updateLookup' });
+    const presenceStream = ChatPresence.watch([], { fullDocument: 'updateLookup' });
+
+    messageStream.on('change', async (change) => {
+      try {
+        const message = change.fullDocument;
+        if (!message) return;
+        if (change.operationType === 'insert') {
+          const conversation = await ChatConversation.findById(message.conversationId).select('userId').lean();
+          if (conversation) publishChatMessage(conversation.userId, serializeMessage(message));
+          return;
+        }
+
+        if (change.operationType === 'update' && change.updateDescription?.updatedFields?.seenAt) {
+          const conversation = await ChatConversation.findById(message.conversationId).select('userId').lean();
+          if (conversation) {
+            const seenBy = message.senderType === 'user' ? 'admin' : 'user';
+            publishChatSeen(conversation.userId, message.conversationId, message.seenAt, seenBy);
+          }
+        }
+      } catch (error) {
+        console.error(`Could not relay a chat message change: ${error.message}`);
+      }
+    });
+    presenceStream.on('change', (change) => {
+      const presence = change.fullDocument;
+      if (presence) publishChatPresence(presence.actorType, presence.actorId, presence.status, presence.lastSeenAt);
+    });
+
+    for (const [name, stream] of [['message', messageStream], ['presence', presenceStream]]) {
+      stream.on('error', (error) => {
+        console.error(`Chat ${name} change stream failed: ${error.message}`);
+        changeStreamsPromise = undefined;
+      });
+    }
+  })().catch((error) => {
+    changeStreamsPromise = undefined;
+    console.error(`Could not start chat change streams: ${error.message}`);
+  });
+  return changeStreamsPromise;
+}
 
 function readCookies(header = '') {
   return Object.fromEntries(header.split(';').map((part) => {
@@ -118,12 +164,16 @@ export function attachChatWebSocket(server, { allowedOrigins = [] } = {}) {
   server.on('upgrade', async (request, socket, head) => {
     let pathname;
     try { pathname = new URL(request.url, 'http://localhost').pathname; } catch { socket.destroy(); return; }
-    if (pathname !== '/ws/chat') return;
+    if (pathname !== '/ws/chat' && pathname !== '/api/ws') return;
     const origin = request.headers.origin;
     if (origin && allowedOrigins.length && !allowedOrigins.includes(origin)) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy(); return; }
 
     try {
       await connectDB();
+      // MongoDB change streams relay messages and presence to sockets held by
+      // other Vercel Function instances. Local EventEmitter delivery remains
+      // the fast path and the event bus deduplicates the change stream echo.
+      await ensureChatChangeStreams();
       const cookies = readCookies(request.headers.cookie);
       const url = new URL(request.url, 'http://localhost');
       const requestedRole = url.searchParams.get('role');
@@ -132,7 +182,7 @@ export function attachChatWebSocket(server, { allowedOrigins = [] } = {}) {
       }
       let identity;
       const ticket = url.searchParams.get('ticket');
-      const ticketAdmin = ticket ? consumeChatSocketTicket(ticket) : null;
+      const ticketAdmin = ticket ? await consumeChatSocketTicket(ticket) : null;
       if (requestedRole === 'admin' && ticketAdmin) identity = { type: 'admin', id: ticketAdmin.id };
       if (!requestedRole && ticketAdmin) identity = { type: 'admin', id: ticketAdmin.id };
       if (requestedRole !== 'user' && !identity && cookies.adminToken) {

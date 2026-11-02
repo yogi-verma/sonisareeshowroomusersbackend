@@ -1,19 +1,21 @@
 import { randomBytes } from 'node:crypto';
-
-const tickets = new Map();
+import ChatSocketTicket from '../models/ChatSocketTicket.js';
 const TTL_MS = 30_000;
 
-export function createChatSocketTicket(adminId) {
-  const now = Date.now();
-  for (const [key, value] of tickets) if (value.expiresAt <= now) tickets.delete(key);
+export async function createChatSocketTicket(adminId) {
   const ticket = randomBytes(32).toString('base64url');
-  tickets.set(ticket, { adminId: String(adminId), expiresAt: now + TTL_MS });
+  await ChatSocketTicket.create({
+    token: ticket,
+    adminId: String(adminId),
+    expiresAt: new Date(Date.now() + TTL_MS)
+  });
   return { ticket, expiresIn: TTL_MS / 1000 };
 }
 
-export function consumeChatSocketTicket(ticket) {
-  const value = tickets.get(ticket);
-  if (!value) return null;
-  tickets.delete(ticket);
-  return value.expiresAt > Date.now() ? { id: value.adminId } : null;
+export async function consumeChatSocketTicket(ticket) {
+  const value = await ChatSocketTicket.findOneAndDelete({
+    token: ticket,
+    expiresAt: { $gt: new Date() }
+  }).lean();
+  return value ? { id: value.adminId } : null;
 }
