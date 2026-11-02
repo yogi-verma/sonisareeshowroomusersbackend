@@ -8,12 +8,6 @@ Copy `.env.example` to `.env` and set `MONGODB_URI`, a long random `JWT_SECRET`,
 
 Run `npm install` and `npm run dev` from this directory.
 
-## Vercel deployment
-
-Set the Vercel project root to `backend`. `vercel.json` rewrites `/ws/chat` to the dedicated `api/ws.js` WebSocket Function; the ordinary Express app continues to serve REST endpoints, while `server.js` runs both REST and WebSocket handlers locally. Deployments must use a MongoDB replica set (MongoDB Atlas supports change streams). The WebSocket instances use MongoDB change streams to relay chat messages and presence between function instances, and admin socket tickets are stored in MongoDB so the ticket endpoint and WebSocket upgrade can run on different instances.
-
-After deploying, verify that `wss://<backend-host>/ws/chat` returns `101 Switching Protocols` for an authenticated connection. Vercel WebSocket connections are pinned to a function instance for their lifetime, so clients reconnect when an instance reaches its configured maximum duration.
-
 ## Routes
 
 - `GET /api/health` — health check.
