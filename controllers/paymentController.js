@@ -49,6 +49,26 @@ async function applyPurchasedCart(order) {
   }
 }
 
+async function applyPurchasedInventory(order) {
+  const items = order.items?.length
+    ? order.items.map(({ productId, quantity }) => ({ productId: String(productId), quantity }))
+    : [{ productId: String(order.productId), quantity: order.quantity }];
+  const baseUrl = (process.env.ADMIN_BACKEND_URL || 'http://localhost:5001').replace(/\/+$/, '');
+  const key = process.env.ADMIN_ORDERS_API_KEY;
+  if (!key) throw new Error('ADMIN_ORDERS_API_KEY is not configured.');
+
+  const response = await fetch(`${baseUrl}/api/internal/inventory/sales`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-inventory-sync-key': key },
+    body: JSON.stringify({ orderId: String(order._id), items }),
+    signal: AbortSignal.timeout(10000)
+  });
+  if (!response.ok) {
+    const result = await response.json().catch(() => ({}));
+    throw new Error(result.message || `Inventory sync failed with status ${response.status}.`);
+  }
+}
+
 async function razorpayRequest(path, init = {}) {
   const { keyId, keySecret } = getCredentials();
   let response;
@@ -270,6 +290,7 @@ export async function verifyPayment(req, res, next) {
       order.deliveryStatus = order.deliveryStatus || 'pending';
       order.paidAt = order.paidAt || new Date();
       await order.save();
+      await applyPurchasedInventory(order).catch((error) => console.error(`Could not sync paid order inventory: ${error.message}`));
       await applyPurchasedCart(order).catch((error) => console.error(`Could not sync paid cart order: ${error.message}`));
       return res.json({ verified: true, status: 'paid', orderId: order.id });
     }
@@ -326,6 +347,7 @@ export async function handleRazorpayWebhook(req, res) {
       order.deliveryStatus = order.deliveryStatus || 'pending';
       order.paidAt = order.paidAt || new Date();
       await order.save();
+      await applyPurchasedInventory(order);
       await applyPurchasedCart(order);
     } else if (event.event === 'payment.failed' && order.paymentStatus !== 'paid') {
       order.razorpayPaymentId = payment.id || order.razorpayPaymentId;

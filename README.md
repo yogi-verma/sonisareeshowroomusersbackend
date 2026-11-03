@@ -6,6 +6,8 @@ The Express API uses Google OAuth 2.0 for user signup and login. On a first succ
 
 Copy `.env.example` to `.env` and set `MONGODB_URI`, a long random `JWT_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_CALLBACK_URL`, and `FRONTEND_ORIGIN`. Register the exact callback URL in Google Cloud Console, for example `http://localhost:5000/api/auth/google/callback`. The frontend starts sign-in by navigating to `GET /api/auth/google`. Set `AUTH_SUCCESS_PATH` to change the post-login frontend path.
 
+`ADMIN_ORDERS_API_KEY` is a shared server-to-server secret. Its value must match exactly in `backend/.env`, `adminBackend/.env`, and `frontend/.env`. The customer backend uses it to apply paid order stock changes in the admin backend; the frontend also uses it for protected admin order requests. Configure the same secret in all three corresponding Vercel projects for each environment, then redeploy those projects after changing it.
+
 Run `npm install` and `npm run dev` from this directory.
 
 ## Routes
