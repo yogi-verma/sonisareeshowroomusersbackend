@@ -23,9 +23,13 @@ function parsePageValue(value, fallback, maximum, field) {
 }
 
 function serializeReview(review) {
+  const user = review.userId && typeof review.userId === 'object' && review.userId._id
+    ? review.userId
+    : null;
   return {
     id: review._id.toString(),
-    userId: review.userId.toString(),
+    userId: String(user?._id || review.userId),
+    userPicture: user?.picture || '',
     userName: review.userName,
     rating: review.rating,
     comment: review.comment,
@@ -81,6 +85,31 @@ export async function getProductReviews(req, res, next) {
       reviews: reviews.map(serializeReview),
       summary,
       pagination: { limit, skip, hasMore: skip + reviews.length < summary.totalReviews }
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function getAllProductReviews(req, res, next) {
+  try {
+    const limit = parsePageValue(req.query.limit, 100, 100, 'limit');
+    const skip = parsePageValue(req.query.skip, 0, 100000, 'skip');
+    const [reviews, totalReviews] = await Promise.all([
+      ProductReview.find()
+        .select('userId userName rating comment createdAt updatedAt')
+        .populate('userId', 'picture')
+        .sort({ createdAt: -1, _id: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      ProductReview.countDocuments()
+    ]);
+
+    res.set('Cache-Control', 'no-store');
+    return res.json({
+      reviews: reviews.map(serializeReview),
+      pagination: { limit, skip, hasMore: skip + reviews.length < totalReviews }
     });
   } catch (error) {
     return next(error);
