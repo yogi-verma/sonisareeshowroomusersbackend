@@ -18,6 +18,7 @@ import { requireAuth } from '../middleware/requireAuth.js';
 import requireSameOrigin from '../middleware/requireSameOrigin.js';
 import { createCartPaymentOrder, createPaymentOrder, verifyPayment } from '../controllers/paymentController.js';
 import { getMyOrder, listMyOrders } from '../controllers/orderController.js';
+import { validateTry01 } from '../controllers/couponController.js';
 
 const router = Router();
 
@@ -29,6 +30,7 @@ router.post('/me/addresses', requireSameOrigin, createAddress);
 router.patch('/me/addresses/:addressId', requireSameOrigin, updateAddress);
 router.delete('/me/addresses/:addressId', requireSameOrigin, deleteAddress);
 router.get('/me/cart', getCart);
+router.post('/me/coupons/validate', requireSameOrigin, validateTry01);
 router.post('/me/cart/items', requireSameOrigin, addCartItem);
 router.patch('/me/cart/items/:productId', requireSameOrigin, updateCartItem);
 router.delete('/me/cart/items/:productId', requireSameOrigin, removeCartItem);

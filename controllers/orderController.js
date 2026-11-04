@@ -32,6 +32,11 @@ function toOrderSummary(order) {
     unitPrice: order.unitPrice,
     lineTotal: order.amount / 100
   }];
+  const couponCode = order.couponCode || '';
+  const couponProductId = order.couponProductId?.toString() || '';
+  const couponProductName = couponProductId
+    ? items.find((item) => item.productId === couponProductId)?.name || ''
+    : '';
 
   return {
     id: order._id.toString(),
@@ -44,7 +49,12 @@ function toOrderSummary(order) {
     itemCount: items.length,
     items,
     unitPrice: order.unitPrice,
+    subtotalAmount: items.reduce((total, item) => total + item.lineTotal, 0),
     totalAmount: order.amount / 100,
+    couponCode,
+    couponProductId,
+    couponProductName,
+    couponDiscount: (order.couponDiscount || 0) / 100,
     currency: order.currency,
     paymentStatus: order.paymentStatus,
     deliveryStatus: order.deliveryStatus || 'pending',

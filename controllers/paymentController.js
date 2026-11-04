@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import Order from '../models/Order.js';
 import User from '../models/User.js';
 import { getCatalogProducts } from '../services/catalogService.js';
+import { calculateCouponDiscount, COUPON_CODE, redeemCouponForOrder, releaseCouponForOrder, reserveCoupon } from '../services/couponService.js';
 
 function httpError(statusCode, message) {
   return Object.assign(new Error(message), { statusCode });
@@ -98,7 +99,9 @@ async function razorpayRequest(path, init = {}) {
 export async function createPaymentOrder(req, res, next) {
   let localOrder;
   try {
-    const { productId, quantity = 1 } = req.body || {};
+    const { productId, quantity = 1, couponCode } = req.body || {};
+    const normalizedCoupon = typeof couponCode === 'string' ? couponCode.trim().toUpperCase() : '';
+    if (normalizedCoupon && normalizedCoupon !== COUPON_CODE) throw httpError(400, 'Invalid coupon code.');
     if (typeof productId !== 'string' || !mongoose.isValidObjectId(productId)) {
       throw httpError(400, 'A valid productId is required.');
     }
@@ -114,7 +117,9 @@ export async function createPaymentOrder(req, res, next) {
     if (product.stock < quantity) throw httpError(409, `Only ${product.stock} item(s) are currently available.`);
 
     const unitPrice = Number(product.price.toFixed(2));
-    const amount = Math.round(unitPrice * 100) * quantity;
+    const subtotal = Math.round(unitPrice * 100) * quantity;
+    const couponDiscount = normalizedCoupon ? calculateCouponDiscount(subtotal) : 0;
+    const amount = subtotal - couponDiscount;
     if (amount < 100) throw httpError(400, 'The minimum payment amount is ₹1.00.');
     if (!Number.isSafeInteger(amount)) throw httpError(400, 'The payment amount is invalid.');
 
@@ -143,10 +148,15 @@ export async function createPaymentOrder(req, res, next) {
       quantity,
       unitPrice,
       amount,
+      couponCode: normalizedCoupon,
+      couponDiscount,
+      couponProductId: normalizedCoupon ? product._id : null,
       currency: 'INR',
       receipt: `ss_${new mongoose.Types.ObjectId().toString()}`,
       paymentStatus: 'creating'
     });
+
+    if (normalizedCoupon) await reserveCoupon({ user: req.user, orderId: localOrder._id });
 
     const gatewayOrder = await razorpayRequest('/orders', {
       method: 'POST',
@@ -169,6 +179,7 @@ export async function createPaymentOrder(req, res, next) {
       productName: product.name
     });
   } catch (error) {
+    if (localOrder) await releaseCouponForOrder(localOrder).catch(() => {});
     if (localOrder && localOrder.paymentStatus === 'creating') {
       localOrder.paymentStatus = 'failed';
       await localOrder.save().catch(() => {});
@@ -181,6 +192,12 @@ export async function createCartPaymentOrder(req, res, next) {
   let localOrder;
   try {
     const cart = req.user.cart || [];
+    const { couponCode, couponProductId } = req.body || {};
+    const normalizedCoupon = typeof couponCode === 'string' ? couponCode.trim().toUpperCase() : '';
+    if (normalizedCoupon && normalizedCoupon !== COUPON_CODE) throw httpError(400, 'Invalid coupon code.');
+    if (normalizedCoupon && (typeof couponProductId !== 'string' || !mongoose.isValidObjectId(couponProductId))) {
+      throw httpError(400, 'A valid couponProductId is required when using TRY01.');
+    }
     if (!cart.length) throw httpError(400, 'Your cart is empty. Add a product before checkout.');
 
     const products = await getCatalogProducts(cart.map((item) => String(item.productId)));
@@ -204,7 +221,11 @@ export async function createCartPaymentOrder(req, res, next) {
       };
     });
 
-    const amount = items.reduce((sum, item) => sum + Math.round(item.unitPrice * 100) * item.quantity, 0);
+    const couponItem = normalizedCoupon ? items.find((item) => String(item.productId) === couponProductId) : null;
+    if (normalizedCoupon && !couponItem) throw httpError(400, 'The selected coupon product must be in your cart.');
+    const subtotal = items.reduce((sum, item) => sum + Math.round(item.unitPrice * 100) * item.quantity, 0);
+    const couponDiscount = couponItem ? calculateCouponDiscount(Math.round(couponItem.unitPrice * 100) * couponItem.quantity) : 0;
+    const amount = subtotal - couponDiscount;
     if (amount < 100) throw httpError(400, 'The minimum payment amount is ₹1.00.');
     if (!Number.isSafeInteger(amount)) throw httpError(400, 'The payment amount is invalid.');
 
@@ -226,10 +247,15 @@ export async function createCartPaymentOrder(req, res, next) {
       quantity: totalQuantity,
       unitPrice: firstItem.unitPrice,
       amount,
+      couponCode: normalizedCoupon,
+      couponDiscount,
+      couponProductId: couponItem?.productId || null,
       currency: 'INR',
       receipt: `ss_${new mongoose.Types.ObjectId().toString()}`,
       paymentStatus: 'creating'
     });
+
+    if (normalizedCoupon) await reserveCoupon({ user: req.user, orderId: localOrder._id });
 
     const gatewayOrder = await razorpayRequest('/orders', {
       method: 'POST',
@@ -251,6 +277,7 @@ export async function createCartPaymentOrder(req, res, next) {
       productName: items.length === 1 ? firstItem.name : `${items.length} products`
     });
   } catch (error) {
+    if (localOrder) await releaseCouponForOrder(localOrder).catch(() => {});
     if (localOrder && localOrder.paymentStatus === 'creating') {
       localOrder.paymentStatus = 'failed';
       await localOrder.save().catch(() => {});
@@ -284,6 +311,7 @@ export async function verifyPayment(req, res, next) {
       throw httpError(400, 'Payment details do not match this order.');
     }
     if (payment.status === 'captured') {
+      await redeemCouponForOrder(order);
       order.razorpayPaymentId = payment.id;
       order.paymentMethod = payment.method || '';
       order.paymentStatus = 'paid';
@@ -306,6 +334,7 @@ export async function verifyPayment(req, res, next) {
       order.razorpayPaymentId = payment.id;
       order.paymentStatus = 'failed';
       await order.save();
+      await releaseCouponForOrder(order);
     }
     throw httpError(409, 'Payment is not captured. Please retry or contact support if money was deducted.');
   } catch (error) {
@@ -341,6 +370,7 @@ export async function handleRazorpayWebhook(req, res) {
     }
 
     if (event.event === 'payment.captured') {
+      await redeemCouponForOrder(order);
       order.razorpayPaymentId = payment.id || order.razorpayPaymentId;
       order.paymentMethod = payment.method || order.paymentMethod;
       order.paymentStatus = 'paid';
@@ -354,6 +384,7 @@ export async function handleRazorpayWebhook(req, res) {
       order.paymentMethod = payment.method || order.paymentMethod;
       order.paymentStatus = 'failed';
       await order.save();
+      await releaseCouponForOrder(order);
     }
   } catch (error) {
     console.error(`Razorpay webhook processing failed: ${error.message}`);

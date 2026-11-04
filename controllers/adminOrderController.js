@@ -6,32 +6,39 @@ function httpError(statusCode, message) {
 }
 
 function serializeOrder(order) {
+  const items = (order.items?.length ? order.items : [{
+    productId: order.productId,
+    name: order.productName,
+    productType: order.productType,
+    category: order.category,
+    photoUrl: order.productPhotoUrl,
+    quantity: order.quantity,
+    unitPrice: order.unitPrice,
+    lineTotal: order.amount / 100
+  }]).map((item) => ({
+    productId: String(item.productId),
+    name: item.name,
+    productType: item.productType,
+    category: item.category,
+    photoUrl: item.photoUrl || '',
+    quantity: item.quantity,
+    unitPrice: item.unitPrice,
+    lineTotal: item.lineTotal
+  }));
+  const couponProductId = order.couponProductId?.toString() || '';
   return {
     id: order._id.toString(),
     receipt: order.receipt,
     customerName: order.customerName || 'Customer',
     customerEmail: order.customerEmail || '',
     customerPhone: order.customerPhone || '',
-    items: (order.items?.length ? order.items : [{
-      productId: order.productId,
-      name: order.productName,
-      productType: order.productType,
-      category: order.category,
-      photoUrl: order.productPhotoUrl,
-      quantity: order.quantity,
-      unitPrice: order.unitPrice,
-      lineTotal: order.amount / 100
-    }]).map((item) => ({
-      productId: String(item.productId),
-      name: item.name,
-      productType: item.productType,
-      category: item.category,
-      photoUrl: item.photoUrl || '',
-      quantity: item.quantity,
-      unitPrice: item.unitPrice,
-      lineTotal: item.lineTotal
-    })),
+    items,
+    subtotalAmount: items.reduce((total, item) => total + item.lineTotal, 0),
     totalAmount: order.amount / 100,
+    couponCode: order.couponCode || '',
+    couponDiscount: (order.couponDiscount || 0) / 100,
+    couponProductId,
+    couponProductName: couponProductId ? items.find((item) => item.productId === couponProductId)?.name || '' : '',
     currency: order.currency,
     paymentMethod: order.paymentMethod || 'Razorpay',
     paymentId: order.razorpayPaymentId,

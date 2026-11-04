@@ -37,6 +37,16 @@ All `/api/users/me` routes require a valid session cookie or `Authorization: Bea
 - `DELETE /api/users/me/addresses/:addressId` — delete an address. If the default address is deleted, the first remaining address becomes the default.
 Address records have a maximum of 20 per user. The first saved address is the default unless a different one is selected. Only one address can be default at a time.
 
+## Coupon `TRY01`
+
+The customer backend applies `TRY01` as a 20% discount to one selected product. The coupon is limited to one redemption per signed-in account email; the server uses the normalized email from the authenticated account, never an email supplied by the browser. A reservation prevents concurrent checkout attempts from applying the same coupon. Reservations expire after 30 minutes, and failed payments release them. A coupon is permanently redeemed only after Razorpay confirms the payment as captured.
+
+- `POST /api/users/me/coupons/validate` — authenticated; send `{ "code": "TRY01", "productId": "<catalog product id>" }` to check eligibility. The response includes `discountPercent: 20`. This is a preview; checkout always validates again.
+- `POST /api/users/me/orders` — include `{ "productId": "...", "quantity": 1, "couponCode": "TRY01" }` to discount that product line by 20%.
+- `POST /api/users/me/cart/checkout` — include `{ "couponCode": "TRY01", "couponProductId": "<product id in cart>" }` to discount that selected cart product line by 20%. The rest of the cart is charged at full price.
+
+The local order stores the coupon code, target product, discount in paise, and final Razorpay amount. Paid order summaries expose `couponDiscount` in rupees.
+
 ## Admin and customer chat
 
 Chat is one-to-one between a customer and the showroom admin account; customers cannot address other customers. A customer gets one persistent conversation, created automatically when they send their first message. Messages are limited to 2,000 characters and stored in MongoDB.
